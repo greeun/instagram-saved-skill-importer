@@ -131,7 +131,7 @@ def main():
             return 1
         print(json.dumps({"verified": str(verified)}, ensure_ascii=False))
         return 0
-    missing = [f for f in flags + ("--expected-tree-sha256",) if not getattr(args, f[2:].replace("-", "_"))]
+    missing = [f for f in flags + ("--expected-tree-sha256",) if getattr(args, f[2:].replace("-", "_")) is None]
     if missing:
         parser.error("the following arguments are required: " + ", ".join(missing))
     try:

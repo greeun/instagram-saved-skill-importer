@@ -1,4 +1,4 @@
-# instagram-skill-importer
+# instagram-saved-skill-importer
 
 Claude Code skill that reads one saved Instagram collection or all saved posts, lists the Claude skills mentioned in its posts, reviews their source repositories statically, and installs only the skills you approve into a local skill vault.
 

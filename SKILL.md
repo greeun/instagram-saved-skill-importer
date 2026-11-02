@@ -1,5 +1,5 @@
 ---
-name: instagram-skill-importer
+name: instagram-saved-skill-importer
 description: 인스타그램 저장 게시물(지정 컬렉션 또는 모든 게시물) 중 Claude 스킬 소개 게시물에서 스킬 목록을 추출하고, 원본 저장소 확인과 정적 검토를 거쳐 승인한 스킬만 스킬 vault에 설치한다. 사용 시점 "인스타 저장 글의 스킬 설치", "인스타그램 스킬 가져오기", "저장한 게시물에서 스킬 추출", "import skills from Instagram saved posts".
 version: 1.0.0
 ---
@@ -32,7 +32,7 @@ version: 1.0.0
 ## 1. 수집
 
 1. 사용자에게 읽을 범위를 확인한다. 컬렉션 이름 또는 `모든 게시물`을 지정받는다. 상한은 실행당 연 게시물 수 기준으로 기본 30개이며, 스킬과 관련 없는 게시물도 포함해 계산한다. 사용자가 다른 값을 지정할 수 있다.
-2. `~/.axt/instagram-skill-importer/state.json`을 읽고 해당 범위의 처리 완료 게시물을 제외한다. `모든 게시물`의 범위 이름은 `all-posts`이다. 파일이 없으면 빈 상태로 시작한다.
+2. `~/.axt/instagram-saved-skill-importer/state.json`을 읽고 해당 범위의 처리 완료 게시물을 제외한다. `모든 게시물`의 범위 이름은 `all-posts`이다. 파일이 없으면 빈 상태로 시작한다.
 3. Claude in Chrome 도구를 불러와 새 탭을 만든다. `https://www.instagram.com/`에서 프로필 링크로 사용자 이름을 확인하고 `https://www.instagram.com/<사용자 이름>/saved/`로 이동한다. 이 페이지의 `read_page`(`filter: interactive`)에 컬렉션 링크가 표시된다. 찾지 못하면 컬렉션 이름 목록을 보여 주고 묻는다. 모든 게시물은 `/<사용자 이름>/saved/all-posts/`이다.
 4. 목록 페이지의 `read_page`(`filter: interactive`)에서 `/p/<id>/`와 `/reel/<id>/` 형식의 링크를 모두 모은다. 처음에는 일부만 표시되므로, 상한에 못 미치면 아래로 스크롤해 다시 읽는다. 연속 두 번 스크롤해도 새 링크가 없으면 스크롤을 멈춘다.
 5. 게시물은 클릭하지 않고 `/p/<id>/`와 `/reel/<id>/` 모두 URL로 직접 이동해서 하나씩 연다. 화면을 클릭하면 좋아요나 저장을 잘못 변경할 수 있다. 이동 후 3~5초 기다린 뒤 `get_page_text`로 캡션을 읽고, 스크린샷으로 이미지와 영상의 글자를 읽는다. 캐러셀은 `read_page`에서 다음 이미지 버튼의 ref를 찾아 넘긴다. ref를 찾지 못하면 좌표로 클릭하지 않고, 읽지 못한 이미지가 있다고 기록한다. 특정 CSS 선택자에 의존하지 않는다.
@@ -127,7 +127,7 @@ python3 -I "<skill-dir>/scripts/install_skill.py" --verify "$CHECK/claude-skills
 
 ## 7. 기록
 
-`~/.axt/instagram-skill-importer/state.json`을 갱신하고 `WORK` 폴더를 삭제한다. 중단하거나 오류가 발생한 경우에도 삭제한다. 상위 폴더가 없으면 만든다. 임시 파일에 쓴 뒤 이름을 바꾸어 교체하며, 기존 파일을 해석할 수 없으면 덮어쓰지 않고 멈춰 사용자에게 알린다. 6절을 실행했다면, 병합을 마치거나 사용자가 설치를 취소한 뒤에 기록해 둔 `CU`와 `WT`의 절대 경로로 `git -C <CU> worktree remove <WT>`를 실행해 워크트리를 제거하고, `WT`의 상위 임시 폴더와 기록해 둔 `CHECK` 경로도 삭제한다. 6절을 실행하지 않았다면 워크트리를 제거하지 않는다.
+`~/.axt/instagram-saved-skill-importer/state.json`을 갱신하고 `WORK` 폴더를 삭제한다. 중단하거나 오류가 발생한 경우에도 삭제한다. 상위 폴더가 없으면 만든다. 임시 파일에 쓴 뒤 이름을 바꾸어 교체하며, 기존 파일을 해석할 수 없으면 덮어쓰지 않고 멈춰 사용자에게 알린다. 6절을 실행했다면, 병합을 마치거나 사용자가 설치를 취소한 뒤에 기록해 둔 `CU`와 `WT`의 절대 경로로 `git -C <CU> worktree remove <WT>`를 실행해 워크트리를 제거하고, `WT`의 상위 임시 폴더와 기록해 둔 `CHECK` 경로도 삭제한다. 6절을 실행하지 않았다면 워크트리를 제거하지 않는다.
 
 ```json
 {"collections": {"<컬렉션 또는 all-posts>": {"posts": {"<post_url>": {"processed_at": "<ISO 8601>", "candidates": [{"name": "<이름>", "status": "<판정 또는 pending 또는 repo-error>", "mentioned_links": ["<링크>"], "repo": "<owner/repo 또는 null>", "commit": "<해시 또는 null>", "installed": false}]}}}}}

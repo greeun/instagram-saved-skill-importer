@@ -27,7 +27,7 @@ version: 1.0.0
 - 하위 경로: 각 구간이 같은 패턴과 일치해야 하며 `.`나 `..`이어서는 안 된다.
 - 스킬 이름: `^[a-z0-9][a-z0-9-]{0,63}$`와 일치해야 한다.
 
-검증에 실패한 값은 `미확인`으로 표시하고 보고서에 그대로 인용하며, 명령에는 절대 넣지 않는다. 검증을 통과한 값도 명령에서는 작은따옴표로 감싼다.
+검증에 실패한 값은 `미확인`으로 표시하고 보고서에 그대로 인용하며, 명령에는 절대 넣지 않는다. 검증을 통과한 값도 명령에서는 작은따옴표로 감싼다. 스킬이 저장소 루트에 있으면 하위 경로는 `.`로 지정한다. 이것이 `.`을 허용하는 유일한 경우이다.
 
 ## 1. 수집
 
@@ -65,10 +65,11 @@ version: 1.0.0
 
 ## 4. 정적 검토
 
-승인받은 저장소마다 새로운 빈 임시 폴더에서 처리한다. 셸 변수는 도구 호출 사이에 유지되지 않으므로, `WORK`의 절대 경로를 기록해 두고 이후 명령에 지정한다.
+승인받은 저장소마다 새로운 빈 임시 폴더에서 처리한다. 셸 변수는 도구 호출 사이에 유지되지 않으므로, `WORK`의 절대 경로를 출력해 두고, 이후 호출에서는 출력된 절대 경로를 지정한다.
 
 ```bash
 WORK="$(mktemp -d)"
+echo "$WORK"
 GIT_LFS_SKIP_SMUDGE=1 GIT_TERMINAL_PROMPT=0 git clone -q --depth 1 --no-recurse-submodules 'https://github.com/<owner>/<repo>.git' "$WORK/repo"
 git -C "$WORK/repo" rev-parse HEAD
 python3 -I "<skill-dir>/scripts/audit_skill.py" "$WORK/repo"/'<스킬 하위 경로>' --repo-root "$WORK/repo"
@@ -88,7 +89,7 @@ python3 -I "<skill-dir>/scripts/audit_skill.py" "$WORK/repo"/'<스킬 하위 경
 
 ## 6. 설치
 
-5절에서 사용자가 직접 고른 스킬이 없으면 이 절을 건너뛴다. `CU`, `WT`, `WORK`, `CHECK`는 도구 호출마다 절대 경로로 다시 지정한다.
+5절에서 사용자가 직접 고른 스킬이 없으면 이 절을 건너뛴다. `CU`, `WT`, `WORK`, `CHECK`는 도구 호출 사이에 유지되지 않는다. 경로를 만드는 블록은 그 경로를 출력하며, 이후 호출에서는 출력된 절대 경로를 지정한다.
 
 먼저 저장소 사용자를 확인하고, 값이 있을 때만 `claude-utils`의 `develop`에서 워크트리를 한 번 만든다. 값이 없으면 여기서 멈추고 사용자에게 묻는다.
 
@@ -97,20 +98,21 @@ CU="$(dirname "$(readlink ~/.axt/vault/skills)")"
 git -C "$CU" config --local --get user.name && {
   WT="$(mktemp -d)/claude-utils"
   git -C "$CU" worktree add -q -b "chore/vendor-skills-$(date +%Y%m%d-%H%M%S)" "$WT" develop
-  echo "$WT"
+  echo "CU=$CU"
+  echo "WT=$WT"
 }
 ```
 
 고른 스킬마다 아래 체인을 한 번씩 실행한다. 한 단계라도 실패하면 이후 단계는 실행되지 않는다.
 
 ```bash
-CHECK="$(mktemp -d)" &&
+CHECK="$(mktemp -d)" && echo "CHECK=$CHECK" &&
 python3 -I "<skill-dir>/scripts/install_skill.py" \
   --source "$WORK/repo"/'<스킬 하위 경로>' --repo-root "$WORK/repo" --target-root "$WT/claude-skills" --name '<이름>' \
   --repo-url 'https://github.com/<owner>/<repo>' --subpath '<스킬 하위 경로>' \
   --commit '<40자리 해시>' --expected-tree-sha256 '<검토 시 tree_sha256>' &&
 git -C "$WT" add -f 'claude-skills/<이름>' &&
-git -C "$WT" commit -m "chore(skills): vendor <이름> from <owner>/<repo>@<커밋 앞 8자리>" &&
+git -C "$WT" commit -m 'chore(skills): vendor <이름> from <owner>/<repo>@<커밋 앞 8자리>' &&
 git -C "$WT" archive HEAD 'claude-skills/<이름>' | tar -x -C "$CHECK" &&
 python3 -I "<skill-dir>/scripts/install_skill.py" --verify "$CHECK/claude-skills/<이름>" --expected-tree-sha256 '<검토 시 tree_sha256>'
 ```
@@ -125,7 +127,7 @@ python3 -I "<skill-dir>/scripts/install_skill.py" --verify "$CHECK/claude-skills
 
 ## 7. 기록
 
-`~/.axt/instagram-skill-importer/state.json`을 갱신하고 `WORK` 폴더를 삭제한다. 중단하거나 오류가 발생한 경우에도 삭제한다. 상위 폴더가 없으면 만든다. 임시 파일에 쓴 뒤 이름을 바꾸어 교체하며, 기존 파일을 해석할 수 없으면 덮어쓰지 않고 멈춰 사용자에게 알린다. 6절을 실행했다면, 병합을 마치거나 사용자가 설치를 취소한 뒤에 `git -C "$CU" worktree remove "$WT"`로 워크트리를 제거하고 `WT`의 상위 임시 폴더와 `CHECK`도 삭제한다. 6절을 실행하지 않았다면 워크트리를 제거하지 않는다.
+`~/.axt/instagram-skill-importer/state.json`을 갱신하고 `WORK` 폴더를 삭제한다. 중단하거나 오류가 발생한 경우에도 삭제한다. 상위 폴더가 없으면 만든다. 임시 파일에 쓴 뒤 이름을 바꾸어 교체하며, 기존 파일을 해석할 수 없으면 덮어쓰지 않고 멈춰 사용자에게 알린다. 6절을 실행했다면, 병합을 마치거나 사용자가 설치를 취소한 뒤에 기록해 둔 `CU`와 `WT`의 절대 경로로 `git -C <CU> worktree remove <WT>`를 실행해 워크트리를 제거하고, `WT`의 상위 임시 폴더와 기록해 둔 `CHECK` 경로도 삭제한다. 6절을 실행하지 않았다면 워크트리를 제거하지 않는다.
 
 ```json
 {"collections": {"<컬렉션 또는 all-posts>": {"posts": {"<post_url>": {"processed_at": "<ISO 8601>", "candidates": [{"name": "<이름>", "status": "<판정 또는 pending 또는 repo-error>", "mentioned_links": ["<링크>"], "repo": "<owner/repo 또는 null>", "commit": "<해시 또는 null>", "installed": false}]}}}}}
@@ -140,7 +142,7 @@ python3 -I "<skill-dir>/scripts/install_skill.py" --verify "$CHECK/claude-skills
 | 상황 | 동작 |
 |---|---|
 | Chrome 미연결 또는 로그아웃 | 중단하고 사용자에게 연결이나 로그인을 요청한다 |
-| 저장소 접근 실패 | 해당 후보만 `미확인`으로 두고 계속한다 |
+| 저장소 접근 실패 | 해당 후보를 `repo-error`로 두고 계속한다. 다음 실행에서 원본 확인부터 다시 시작한다 |
 | 일부 설치 실패 | 성공한 스킬은 유지하고 실패 항목과 이유를 보고한다 |
 | 이미지 글자를 읽기 어려움 | 추측하지 않고 `미확인`으로 표시한다 |
 | 저장소 사용자 없음 | 커밋하지 않고 사용자에게 이름과 이메일을 묻는다 |

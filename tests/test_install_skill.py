@@ -234,5 +234,27 @@ class TestVerify(Base):
         self.assertIn("refused", bad.stderr)
 
 
+class TestRootSkill(Base):
+    def cli(self, subpath):
+        return subprocess.run(
+            [sys.executable, "-I", str(SCRIPTS / "install_skill.py"), "--source", str(self.source) + "/.",
+             "--target-root", str(self.target), "--name", "sample", "--repo-url", REPO, "--subpath", subpath,
+             "--commit", COMMIT, "--expected-tree-sha256", audit_skill.tree_sha256(self.source),
+             "--repo-root", str(self.source)],
+            capture_output=True, text=True)
+
+    def test_dot_subpath(self):
+        out = self.cli(".")
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_empty_subpath(self):
+        out = self.cli("")
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_root_dot_passes_check_and_installs(self):
+        audit_skill.check_source(self.source, self.source / ".")
+        self.assertTrue(self.run_install(source=self.source / ".", repo_root=self.source).is_dir())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -102,6 +102,10 @@ class TestRefusals(Base):
         (self.source / "SKILL.md").write_text("no frontmatter", encoding="utf-8")
         self.assert_refused()
 
+    def test_non_utf8_skill_md(self):
+        (self.source / "SKILL.md").write_bytes(b"\xff\xfe")
+        self.assert_refused()
+
     def test_missing_description(self):
         (self.source / "SKILL.md").write_text("---\nname: sample\n---\n", encoding="utf-8")
         self.assert_refused()

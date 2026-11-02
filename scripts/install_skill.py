@@ -26,7 +26,11 @@ class InstallError(Exception):
 def frontmatter(skill_md):
     if not skill_md.is_file():
         raise InstallError("SKILL.md is missing")
-    match = re.match(r"---\n(.*?)\n---(\n|$)", skill_md.read_text(encoding="utf-8"), re.DOTALL)
+    try:
+        text = skill_md.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise InstallError("SKILL.md frontmatter is invalid") from error
+    match = re.match(r"---\n(.*?)\n---(\n|$)", text, re.DOTALL)
     if not match:
         raise InstallError("SKILL.md frontmatter is invalid")
     fields = dict(re.findall(r"^(name|description):[ \t]*(\S.*)$", match.group(1), re.MULTILINE))

@@ -126,7 +126,7 @@ class TestCli(Base):
         return subprocess.run(
             [sys.executable, "-I", str(SCRIPTS / "install_skill.py"), "--source", str(self.source),
              "--target-root", str(self.target), "--name", "sample", "--repo-url", REPO, "--subpath", ".",
-             "--commit", COMMIT, "--expected-tree-sha256", expected],
+             "--commit", COMMIT, "--expected-tree-sha256", expected, "--repo-root", str(self.base)],
             capture_output=True, text=True, cwd=self.source)
 
     def test_success(self):
@@ -138,6 +138,100 @@ class TestCli(Base):
         out = self.cli("0" * 64)
         self.assertEqual(out.returncode, 1)
         self.assertIn("tree_sha256", out.stderr)
+
+
+class TestRepoRoot(Base):
+    def test_symlinked_source_refused_with_repo_root(self):
+        real = self.base / "real"
+        real.mkdir()
+        (real / "SKILL.md").write_text("---\nname: sample\ndescription: Sample text.\n---\n", encoding="utf-8")
+        os.symlink(real, self.base / "alias")
+        with self.assertRaises(install_skill.InstallError):
+            self.run_install(source=self.base / "alias", repo_root=self.base,
+                             expected_tree=audit_skill.tree_sha256(real))
+
+    def test_source_outside_repo_root_refused(self):
+        other = self.base / "other"
+        other.mkdir()
+        with self.assertRaises(install_skill.InstallError):
+            self.run_install(repo_root=other)
+
+    def test_source_inside_repo_root_installs(self):
+        self.assertTrue(self.run_install(repo_root=self.base).is_dir())
+
+    def test_cli_requires_repo_root(self):
+        out = subprocess.run(
+            [sys.executable, "-I", str(SCRIPTS / "install_skill.py"), "--source", str(self.source),
+             "--target-root", str(self.target), "--name", "sample", "--repo-url", REPO, "--subpath", ".",
+             "--commit", COMMIT, "--expected-tree-sha256", audit_skill.tree_sha256(self.source)],
+            capture_output=True, text=True)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("repo-root", out.stderr)
+
+    def test_cli_repo_root_failure_is_refusal(self):
+        other = self.base / "other"
+        other.mkdir()
+        out = subprocess.run(
+            [sys.executable, "-I", str(SCRIPTS / "install_skill.py"), "--source", str(self.source),
+             "--target-root", str(self.target), "--name", "sample", "--repo-url", REPO, "--subpath", ".",
+             "--commit", COMMIT, "--expected-tree-sha256", audit_skill.tree_sha256(self.source),
+             "--repo-root", str(other)],
+            capture_output=True, text=True)
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("refused", out.stderr)
+
+
+class TestVendoredMetadataInSource(Base):
+    def test_source_with_metadata_file_refused(self):
+        (self.source / ".vendored-from.json").write_text("{}", encoding="utf-8")
+        with self.assertRaises(install_skill.InstallError):
+            self.run_install()
+        self.assertEqual(list(self.target.iterdir()), [])
+
+
+class TestVerify(Base):
+    def setUp(self):
+        super().setUp()
+        (self.source / "refs").mkdir()
+        (self.source / "refs/a.md").write_text("x", encoding="utf-8")
+        self.tree = audit_skill.tree_sha256(self.source)
+        self.dest = self.run_install()
+
+    def test_success(self):
+        self.assertEqual(install_skill.verify(self.dest, self.tree), self.dest)
+
+    def test_changed_file(self):
+        (self.dest / "refs/a.md").write_text("y", encoding="utf-8")
+        with self.assertRaises(install_skill.InstallError):
+            install_skill.verify(self.dest, self.tree)
+
+    def test_missing_file(self):
+        (self.dest / "refs/a.md").unlink()
+        with self.assertRaises(install_skill.InstallError):
+            install_skill.verify(self.dest, self.tree)
+
+    def test_missing_metadata(self):
+        (self.dest / ".vendored-from.json").unlink()
+        with self.assertRaises(install_skill.InstallError):
+            install_skill.verify(self.dest, self.tree)
+
+    def test_metadata_hash_mismatch(self):
+        meta = self.dest / ".vendored-from.json"
+        data = json.loads(meta.read_text(encoding="utf-8"))
+        data["tree_sha256"] = "0" * 64
+        meta.write_text(json.dumps(data), encoding="utf-8")
+        with self.assertRaises(install_skill.InstallError):
+            install_skill.verify(self.dest, self.tree)
+
+    def test_cli_verify(self):
+        run = lambda h: subprocess.run([sys.executable, "-I", str(SCRIPTS / "install_skill.py"), "--verify", str(self.dest),
+                                        "--expected-tree-sha256", h], capture_output=True, text=True)
+        ok = run(self.tree)
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertEqual(json.loads(ok.stdout)["verified"], str(self.dest))
+        bad = run("0" * 64)
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("refused", bad.stderr)
 
 
 if __name__ == "__main__":

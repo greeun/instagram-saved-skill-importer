@@ -13,10 +13,11 @@ from pathlib import Path
 
 # python3 -I removes the script directory from sys.path. Add only this trusted directory back.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from audit_skill import iter_entries, tree_sha256  # noqa: E402
+from audit_skill import check_source, iter_entries, tree_sha256  # noqa: E402
 
 NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 COMMIT = re.compile(r"[0-9a-f]{40}")
+METADATA = ".vendored-from.json"
 
 
 class InstallError(Exception):
@@ -39,7 +40,7 @@ def frontmatter(skill_md):
     return fields
 
 
-def install(source, target_root, name, repo_url, subpath, commit, expected_tree):
+def install(source, target_root, name, repo_url, subpath, commit, expected_tree, *, repo_root=None):
     source, target_root = Path(source), Path(target_root)
     if not NAME.fullmatch(name):
         raise InstallError(f"invalid skill name: {name!r}")
@@ -47,11 +48,18 @@ def install(source, target_root, name, repo_url, subpath, commit, expected_tree)
         raise InstallError("commit must be a full 40-character hash")
     if not repo_url.startswith("https://"):
         raise InstallError("repo URL must use https")
+    if repo_root is not None:
+        try:
+            check_source(repo_root, source)
+        except ValueError as error:
+            raise InstallError(str(error)) from error
     dest = target_root / name
     staging = None
     try:
         if dest.is_symlink() or dest.exists():
             raise InstallError(f"target already exists: {dest}")
+        if os.path.lexists(source / METADATA):
+            raise InstallError(f"source contains a top-level {METADATA}")
         entries = iter_entries(source)
         if any(p.is_symlink() for p in entries):
             raise InstallError("source contains a symlink")
@@ -74,7 +82,7 @@ def install(source, target_root, name, repo_url, subpath, commit, expected_tree)
             raise InstallError("tree_sha256 of the copy differs from the reviewed content")
         meta = {"repo_url": repo_url, "subpath": subpath, "commit": commit, "tree_sha256": expected_tree,
                 "installed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
-        (staging / ".vendored-from.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+        (staging / METADATA).write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
         staging.chmod(0o755)
         staging.rename(dest)
     except BaseException as error:
@@ -86,13 +94,49 @@ def install(source, target_root, name, repo_url, subpath, commit, expected_tree)
     return dest
 
 
+def verify(dest, expected_tree):
+    """Check that an installed (or committed and re-extracted) skill still matches the reviewed hash."""
+    dest = Path(dest)
+    if dest.is_symlink() or not dest.is_dir():
+        raise InstallError(f"not a directory: {dest}")
+    meta_path = dest / METADATA
+    if not meta_path.is_file() or meta_path.is_symlink():
+        raise InstallError(f"{METADATA} is missing")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise InstallError(f"{METADATA} is unreadable") from error
+    if not isinstance(meta, dict) or meta.get("tree_sha256") != expected_tree:
+        raise InstallError(f"{METADATA} tree_sha256 differs from the reviewed content")
+    if tree_sha256(dest, exclude=(METADATA,)) != expected_tree:
+        raise InstallError("tree_sha256 of the installed content differs from the reviewed content")
+    return dest
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for flag in ("--source", "--target-root", "--name", "--repo-url", "--subpath", "--commit", "--expected-tree-sha256"):
-        parser.add_argument(flag, required=True)
+    flags = ("--source", "--target-root", "--name", "--repo-url", "--subpath", "--commit", "--repo-root")
+    for flag in flags:
+        parser.add_argument(flag)
+    parser.add_argument("--expected-tree-sha256")
+    parser.add_argument("--verify", metavar="DIR")
     args = parser.parse_args()
+    if args.verify:
+        if not args.expected_tree_sha256:
+            parser.error("--verify needs --expected-tree-sha256")
+        try:
+            verified = verify(args.verify, args.expected_tree_sha256)
+        except InstallError as error:
+            print(f"refused: {error}", file=sys.stderr)
+            return 1
+        print(json.dumps({"verified": str(verified)}, ensure_ascii=False))
+        return 0
+    missing = [f for f in flags + ("--expected-tree-sha256",) if not getattr(args, f[2:].replace("-", "_"))]
+    if missing:
+        parser.error("the following arguments are required: " + ", ".join(missing))
     try:
-        dest = install(args.source, args.target_root, args.name, args.repo_url, args.subpath, args.commit, args.expected_tree_sha256)
+        dest = install(args.source, args.target_root, args.name, args.repo_url, args.subpath, args.commit,
+                       args.expected_tree_sha256, repo_root=args.repo_root)
     except InstallError as error:
         print(f"refused: {error}", file=sys.stderr)
         return 1
